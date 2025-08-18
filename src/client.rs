@@ -1,9 +1,4 @@
-use std::{
-    future::Future,
-    ptr::{copy, copy_nonoverlapping},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{future::Future, ptr::copy_nonoverlapping, rc::Rc, sync::Arc};
 
 use anyhow::bail;
 use byteorder::{BigEndian, WriteBytesExt};
@@ -444,7 +439,7 @@ impl<S: AsyncReadRent> StreamWrapper<S> {
                     tracing::debug!("Received possible NewSessionTicket message (post-handshake)");
                     // Just pass through the NewSessionTicket message
                     self.read_authorized = true;
-                    return Ok(buf);
+                    return Ok(buf.len());
                 }
 
                 if buf.len() >= TLS_HEADER_SIZE + 4 {
@@ -464,7 +459,7 @@ impl<S: AsyncReadRent> StreamWrapper<S> {
                         hmac.update(&buf[TLS_HEADER_SIZE..expected_hmac_position]);
 
                         // Compare calculated HMAC with expected HMAC
-                        if hmac.finalize()[..] == expected_hmac {
+                        if hmac.finalize()[..] == expected_hmac[..] {
                             // XOR the payload excluding the HMAC part
                             xor_slice(&mut buf[TLS_HEADER_SIZE..expected_hmac_position], key);
 

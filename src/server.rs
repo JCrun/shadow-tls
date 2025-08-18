@@ -1,13 +1,7 @@
-use std::{
-    borrow::Cow,
-    collections::VecDeque,
-    ptr::{copy, copy_nonoverlapping},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{borrow::Cow, collections::VecDeque, ptr::copy_nonoverlapping, rc::Rc, sync::Arc};
 
 use anyhow::bail;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt};
 use local_sync::oneshot::Sender;
 use monoio::{
     buf::{IoBuf, IoBufMut, Slice, SliceMut},
@@ -357,7 +351,7 @@ impl ShadowTlsServer {
             // In TLS 1.3, NewSessionTicket messages are commonly sent after handshake
             let fake_session_ticket =
                 generate_fake_new_session_ticket(&self.password, &server_random);
-            let (res, _) = c_write.write_all(&fake_session_ticket).await;
+            let (res, _) = c_write.write_all(fake_session_ticket).await;
             if res.is_err() {
                 tracing::warn!("Failed to send fake NewSessionTicket message");
             } else {
@@ -925,7 +919,7 @@ fn generate_fake_new_session_ticket(password: &str, server_random: &[u8]) -> Vec
     payload.extend_from_slice(&nonce);
 
     // Ticket Length (use part of HMAC of password and server_random to make it deterministic but look random)
-    let mut hmac = Hmac::new(password, (server_random, b"TICKET"));
+    let hmac = Hmac::new(password, (server_random, b"TICKET"));
     let ticket_hmac = hmac.finalize();
     let ticket_len = ((ticket_hmac[0] as u16) << 8 | ticket_hmac[1] as u16) % 512 + 128; // Random length between 128-640 bytes
     payload.extend_from_slice(&(ticket_len as u16).to_be_bytes());
