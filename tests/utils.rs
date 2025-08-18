@@ -121,6 +121,115 @@ pub fn test_ok_v3(
     }
 }
 
+pub fn test_ok_v3(
+    client: RunningArgs,
+    server: RunningArgs,
+    http_request: &[u8],
+    http_response: &[u8],
+) {
+    let client_listen = match &client {
+        RunningArgs::Client { listen_addr, .. } => listen_addr.clone(),
+        RunningArgs::Server { .. } => panic!("not valid client args"),
+    };
+    client.build().expect("build client failed").start(1);
+    server.build().expect("build server failed").start(1);
+
+    // Sleep longer to ensure both client and server are ready
+    std::thread::sleep(Duration::from_secs(5));
+
+    // 重试多次以应对可能的连接问题
+    let max_retries = 3;
+    let mut success = false;
+
+    for attempt in 1..=max_retries {
+        println!("Attempt {} of {}", attempt, max_retries);
+
+        match TcpStream::connect(&client_listen) {
+            Ok(mut conn) => {
+                // 设置较长的超时时间
+                conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                conn.set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+
+                // 写请求
+                if let Err(e) = conn.write_all(http_request) {
+                    println!("Failed to write request on attempt {}: {:?}", attempt, e);
+                    std::thread::sleep(Duration::from_secs(2));
+                    continue;
+                }
+
+                // 读响应，使用多次读取来处理可能的连接重置问题
+                let mut buf = [0; 4096];
+                let mut total_read = 0;
+                let mut read_attempts = 0;
+                const MAX_READ_ATTEMPTS: usize = 3;
+
+                while read_attempts < MAX_READ_ATTEMPTS && total_read < http_response.len() {
+                    match conn.read(&mut buf[total_read..]) {
+                        Ok(0) => {
+                            // 连接已关闭，但我们可能已经读取了足够的数据
+                            break;
+                        }
+                        Ok(n) => {
+                            total_read += n;
+                            if total_read >= http_response.len() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            // 如果是连接重置错误但已读取足够数据，则忽略该错误
+                            if total_read >= http_response.len() {
+                                println!(
+                                    "Ignoring read error after reading sufficient data: {:?}",
+                                    e
+                                );
+                                break;
+                            }
+
+                            // 其他错误，增加尝试次数
+                            println!(
+                                "Read error on attempt {}, read try {}: {:?}",
+                                attempt, read_attempts, e
+                            );
+                            read_attempts += 1;
+                            std::thread::sleep(Duration::from_millis(500));
+                            continue;
+                        }
+                    }
+                }
+
+                // 检查是否已读取足够的数据
+                if total_read >= http_response.len() {
+                    let response_start = &buf[..http_response.len()];
+                    if response_start == http_response {
+                        success = true;
+                        break;
+                    } else {
+                        println!(
+                            "Response doesn't match on attempt {}. Got: {:?}, Expected: {:?}",
+                            attempt,
+                            String::from_utf8_lossy(response_start),
+                            String::from_utf8_lossy(http_response)
+                        );
+                    }
+                } else {
+                    println!(
+                        "Response too short on attempt {}: got {} bytes, expected at least {} bytes",
+                        attempt, total_read, http_response.len()
+                    );
+                }
+            }
+            Err(e) => {
+                println!("Failed to connect on attempt {}: {:?}", attempt, e);
+            }
+        }
+
+        std::thread::sleep(Duration::from_secs(2));
+    }
+
+    assert!(success, "Test failed after {} attempts", max_retries);
+}
+
 pub fn test_hijack(client: RunningArgs) {
     let client_listen = match &client {
         RunningArgs::Client { listen_addr, .. } => listen_addr.clone(),

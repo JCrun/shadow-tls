@@ -37,8 +37,8 @@ fn tls13_v2() {
 #[test]
 fn tls13_v3_lossy() {
     let client = RunningArgs::Client {
-        listen_addr: "127.0.0.1:31002".to_string(),
-        target_addr: "127.0.0.1:31003".to_string(),
+        listen_addr: "127.0.0.1:31022".to_string(),
+        target_addr: "127.0.0.1:31023".to_string(),
         tls_names: TlsNames::try_from("captive.apple.com").unwrap(),
         tls_ext: TlsExtConfig::new(None),
         password: "test".to_string(),
@@ -47,7 +47,7 @@ fn tls13_v3_lossy() {
         v3: V3Mode::Lossy,
     };
     let server = RunningArgs::Server {
-        listen_addr: "127.0.0.1:31003".to_string(),
+        listen_addr: "127.0.0.1:31023".to_string(),
         target_addr: "bing.com:80".to_string(),
         tls_addr: TlsAddrs::try_from("captive.apple.com").unwrap(),
         password: "test".to_string(),
@@ -64,8 +64,8 @@ fn tls13_v3_lossy() {
 #[test]
 fn tls13_v3_strict() {
     let client = RunningArgs::Client {
-        listen_addr: "127.0.0.1:31004".to_string(),
-        target_addr: "127.0.0.1:31005".to_string(),
+        listen_addr: "127.0.0.1:31024".to_string(),
+        target_addr: "127.0.0.1:31025".to_string(),
         tls_names: TlsNames::try_from("captive.apple.com").unwrap(),
         tls_ext: TlsExtConfig::new(None),
         password: "test".to_string(),
@@ -74,7 +74,7 @@ fn tls13_v3_strict() {
         v3: V3Mode::Strict,
     };
     let server = RunningArgs::Server {
-        listen_addr: "127.0.0.1:31005".to_string(),
+        listen_addr: "127.0.0.1:31025".to_string(),
         target_addr: "bing.com:80".to_string(),
         tls_addr: TlsAddrs::try_from("captive.apple.com").unwrap(),
         password: "test".to_string(),
