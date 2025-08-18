@@ -55,7 +55,7 @@ fn tls13_v3_lossy() {
         fastopen: true,
         v3: V3Mode::Lossy,
     };
-    utils::test_ok(client, server, BING_HTTP_REQUEST, BING_HTTP_RESP);
+    utils::test_ok_v3(client, server, BING_HTTP_REQUEST, BING_HTTP_RESP);
 }
 
 // handshake: captive.apple.com(tls1.3)
@@ -82,7 +82,7 @@ fn tls13_v3_strict() {
         fastopen: true,
         v3: V3Mode::Strict,
     };
-    utils::test_ok(client, server, BING_HTTP_REQUEST, BING_HTTP_RESP);
+    utils::test_ok_v3(client, server, BING_HTTP_REQUEST, BING_HTTP_RESP);
 }
 
 // handshake: captive.apple.com(tls1.3)
