@@ -17,6 +17,7 @@ use monoio::{
     },
     net::TcpStream,
 };
+use rand::{Rng, RngCore};
 use serde::Deserialize;
 
 use crate::{
@@ -349,6 +350,20 @@ impl ShadowTlsServer {
             maybe_pure?
         };
         tracing::debug!("handshake relay finished");
+
+        // Send fake NewSessionTicket messages after ClientFinished to mimic OpenSSL behavior
+        // This helps mask the ShadowTLS traffic by making it look like normal post-handshake behavior
+        if use_tls13 {
+            // In TLS 1.3, NewSessionTicket messages are commonly sent after handshake
+            let fake_session_ticket =
+                generate_fake_new_session_ticket(&self.password, &server_random);
+            let (res, _) = c_write.write_all(&fake_session_ticket).await;
+            if res.is_err() {
+                tracing::warn!("Failed to send fake NewSessionTicket message");
+            } else {
+                tracing::debug!("Sent fake NewSessionTicket message");
+            }
+        }
 
         // early drop useless resources
         drop(first_server_frame);
@@ -854,22 +869,23 @@ async fn copy_by_frame_with_modification(
                 let mut buffer = buffer_res?;
                 // Note: if we get frame, it is guaranteed valid.
                 if buffer[0] == APPLICATION_DATA {
-                    // do modification: xor data, add 4-byte hmac, update tls frame length
+                    // do modification: xor data, embed hmac without changing the length
                     xor_slice(&mut buffer[TLS_HEADER_SIZE..], xor);
                     hmac.update(&buffer[TLS_HEADER_SIZE..]);
                     let hash = hmac.finalize();
-                    buffer.extend_from_slice(&hash);
-                    unsafe {
-                        copy(buffer.as_ptr().add(TLS_HEADER_SIZE), buffer.as_mut_ptr().add(TLS_HMAC_HEADER_SIZE), buffer.len() - TLS_HMAC_HEADER_SIZE);
-                        copy_nonoverlapping(hash.as_ptr(), buffer.as_mut_ptr().add(TLS_HEADER_SIZE), HMAC_SIZE);
+
+                    // Instead of extending the buffer, we embed the HMAC
+                    // at the end of the payload, replacing the last HMAC_SIZE bytes
+                    if buffer.len() >= TLS_HEADER_SIZE + HMAC_SIZE {
+                        let payload_end = buffer.len();
+                        let embed_position = payload_end - HMAC_SIZE;
+                        unsafe {
+                            copy_nonoverlapping(hash.as_ptr(), buffer.as_mut_ptr().add(embed_position), HMAC_SIZE);
+                        }
+                        // No need to modify the length since we're keeping it unchanged
                     }
 
-                    let mut size: [u8; 2] = Default::default();
-                    size.copy_from_slice(&buffer[3..5]);
-                    let data_size = u16::from_be_bytes(size);
-                    // Normally it does not overflow.
-                    let data_size = data_size.wrapping_add(HMAC_SIZE as u16);
-                    (&mut buffer[3..5]).write_u16::<BigEndian>(data_size).unwrap();
+                    // We don't modify the frame length since overall length remains the same
                 }
 
                 // writing is not cancelable
@@ -879,6 +895,67 @@ async fn copy_by_frame_with_modification(
             }
         }
     }
+}
+
+/// Generate a fake NewSessionTicket message to mimic OpenSSL's post-handshake behavior
+fn generate_fake_new_session_ticket(password: &str, server_random: &[u8]) -> Vec<u8> {
+    // TLS record header: Content Type: Application Data (23), Version: TLS 1.2 (0x0303), Length: calculated later
+    let mut ticket = vec![0x17, 0x03, 0x03, 0x00, 0x00];
+
+    // NewSessionTicket message (TLS 1.3)
+    // Message Type: New Session Ticket (4)
+    let mut payload = vec![0x04];
+
+    // Length (to be filled later)
+    payload.extend_from_slice(&[0x00, 0x00, 0x00]);
+
+    // Ticket Lifetime (86400 seconds = 24 hours)
+    payload.extend_from_slice(&[0x00, 0x01, 0x51, 0x80]);
+
+    // Ticket Age Add (random 32-bit value)
+    let mut rng = rand::thread_rng();
+    let age_add: u32 = rng.gen();
+    payload.extend_from_slice(&age_add.to_be_bytes());
+
+    // Ticket Nonce Length (8 bytes)
+    payload.push(0x08);
+
+    // Ticket Nonce (8 random bytes)
+    let nonce: [u8; 8] = rng.gen();
+    payload.extend_from_slice(&nonce);
+
+    // Ticket Length (use part of HMAC of password and server_random to make it deterministic but look random)
+    let mut hmac = Hmac::new(password, (server_random, b"TICKET"));
+    let ticket_hmac = hmac.finalize();
+    let ticket_len = ((ticket_hmac[0] as u16) << 8 | ticket_hmac[1] as u16) % 512 + 128; // Random length between 128-640 bytes
+    payload.extend_from_slice(&(ticket_len as u16).to_be_bytes());
+
+    // Ticket data (random bytes)
+    let mut ticket_data = vec![0; ticket_len as usize];
+    rng.fill_bytes(&mut ticket_data);
+    payload.extend_from_slice(&ticket_data);
+
+    // Extensions Length (4 bytes for empty extensions)
+    payload.extend_from_slice(&[0x00, 0x04]);
+
+    // Add a dummy early_data extension (empty)
+    payload.extend_from_slice(&[0x00, 0x2a, 0x00, 0x00]);
+
+    // Update message length
+    let message_len = payload.len();
+    payload[1] = ((message_len - 4) >> 16) as u8;
+    payload[2] = ((message_len - 4) >> 8) as u8;
+    payload[3] = (message_len - 4) as u8;
+
+    // Update record length
+    let record_len = payload.len();
+    ticket[3] = (record_len >> 8) as u8;
+    ticket[4] = record_len as u8;
+
+    // Combine header and payload
+    ticket.extend_from_slice(&payload);
+
+    ticket
 }
 
 #[cfg(test)]
