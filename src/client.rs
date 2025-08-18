@@ -445,9 +445,6 @@ impl<S: AsyncReadRent> StreamWrapper<S> {
                 if buf.len() >= TLS_HEADER_SIZE + 4 {
                     // Minimum size to have HMAC embedded at the end
                     if let Some(State { hmac, key, .. }) = self.read_state.as_mut() {
-                        // Clone the buffer for HMAC verification
-                        let mut verify_buf = buf.clone();
-
                         // Get payload length excluding TLS header (5 bytes)
                         let payload_len = buf.len() - TLS_HEADER_SIZE;
 

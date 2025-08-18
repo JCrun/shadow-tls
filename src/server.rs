@@ -922,7 +922,7 @@ fn generate_fake_new_session_ticket(password: &str, server_random: &[u8]) -> Vec
     let hmac = Hmac::new(password, (server_random, b"TICKET"));
     let ticket_hmac = hmac.finalize();
     let ticket_len = ((ticket_hmac[0] as u16) << 8 | ticket_hmac[1] as u16) % 512 + 128; // Random length between 128-640 bytes
-    payload.extend_from_slice(&(ticket_len as u16).to_be_bytes());
+    payload.extend_from_slice(&ticket_len.to_be_bytes());
 
     // Ticket data (random bytes)
     let mut ticket_data = vec![0; ticket_len as usize];
