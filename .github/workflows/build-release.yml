@@ -80,8 +80,6 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSIONED_TAG }}
             ghcr.io/jcrun/${{ env.IMAGE_NAME }}:latest
             ghcr.io/jcrun/${{ env.IMAGE_NAME }}:${{ env.VERSIONED_TAG }}
-            registry.gitlab.com/${{ secrets.GITLAB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            registry.gitlab.com/${{ secrets.GITLAB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSIONED_TAG }}
           push: true
 
   build-unix:
