@@ -852,6 +852,7 @@ async fn copy_by_frame_with_modification(
     let mut g_buffer = Vec::new();
     let stop = stop.closed();
     let mut stop = std::pin::pin!(stop);
+    let mut rng = rand::thread_rng();
 
     loop {
         monoio::select! {
@@ -863,23 +864,51 @@ async fn copy_by_frame_with_modification(
                 let mut buffer = buffer_res?;
                 // Note: if we get frame, it is guaranteed valid.
                 if buffer[0] == APPLICATION_DATA {
-                    // do modification: xor data, embed hmac without changing the length
+                    // do modification: xor data
                     xor_slice(&mut buffer[TLS_HEADER_SIZE..], xor);
+
+                    // Generate HMAC for authentication
                     hmac.update(&buffer[TLS_HEADER_SIZE..]);
                     let hash = hmac.finalize();
 
-                    // Instead of extending the buffer, we embed the HMAC
-                    // at the end of the payload, replacing the last HMAC_SIZE bytes
-                    if buffer.len() >= TLS_HEADER_SIZE + HMAC_SIZE {
-                        let payload_end = buffer.len();
-                        let embed_position = payload_end - HMAC_SIZE;
-                        unsafe {
-                            copy_nonoverlapping(hash.as_ptr(), buffer.as_mut_ptr().add(embed_position), HMAC_SIZE);
+                    // Adaptive HMAC embedding based on the payload content and size
+                    // This uses a more sophisticated approach to avoid creating consistent patterns
+                    if buffer.len() >= TLS_HEADER_SIZE + 32 {  // Enough space for meaningful embedding
+                        // Use the first byte of the hash to determine embedding strategy
+                        let strategy = hash[0] % 3;
+
+                        match strategy {
+                            0 => {
+                                // Strategy 1: Embed at dynamic position based on hash
+                                let embed_start = TLS_HEADER_SIZE + (hash[1] as usize % (buffer.len() - TLS_HEADER_SIZE - HMAC_SIZE));
+                                for i in 0..HMAC_SIZE {
+                                    // XOR the HMAC into the buffer (subtle modification)
+                                    buffer[embed_start + i] ^= hash[i];
+                                }
+                            },
+                            1 => {
+                                // Strategy 2: Distribute across the buffer
+                                for i in 0..HMAC_SIZE {
+                                    let pos = TLS_HEADER_SIZE + ((hash[i] as usize * 7) % (buffer.len() - TLS_HEADER_SIZE));
+                                    buffer[pos] = ((buffer[pos] as u16 + hash[i] as u16) % 256) as u8;
+                                }
+                            },
+                            _ => {
+                                // Strategy 3: Replace in variable pattern
+                                let mask = hash[1];
+                                for i in 0..(buffer.len() - TLS_HEADER_SIZE) {
+                                    if i % 8 == (mask % 8) as usize && i < buffer.len() - TLS_HEADER_SIZE - 1 {
+                                        let idx = TLS_HEADER_SIZE + i;
+                                        let mod_val = hash[i % HMAC_SIZE];
+                                        // Subtle modification that maintains overall distribution
+                                        buffer[idx] = ((buffer[idx] as u16 + mod_val as u16 / 2) % 256) as u8;
+                                    }
+                                }
+                            }
                         }
-                        // No need to modify the length since we're keeping it unchanged
                     }
 
-                    // We don't modify the frame length since overall length remains the same
+                    // We don't modify the frame length at all
                 }
 
                 // writing is not cancelable
